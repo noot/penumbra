@@ -29,6 +29,7 @@ use crate::component::rpc::{IbcQuery, Storage};
 use crate::component::ClientStateReadExt;
 use crate::prefix::MerklePrefixExt;
 use crate::IBC_COMMITMENT_PREFIX;
+use penumbra_chain::component::StateReadExt as _;
 
 #[async_trait]
 impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ClientQuery for IbcQuery<C, S> {
@@ -39,7 +40,13 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ClientQuery for I
         let snapshot = self.0.latest_snapshot();
         let client_id = ClientId::from_str(&request.get_ref().client_id)
             .map_err(|e| tonic::Status::invalid_argument(format!("invalid client id: {e}")))?;
-        let most_recent_height = get_latest_verified_height(&snapshot, &client_id).await?;
+        let height = Height {
+            revision_number: snapshot
+                .get_revision_number()
+                .await
+                .map_err(|e| tonic::Status::aborted(e.to_string()))?,
+            revision_height: snapshot.version(),
+        };
 
         // Query for client_state and associated proof.
         let (cs_opt, proof) = snapshot
@@ -70,7 +77,7 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ClientQuery for I
         let res = QueryClientStateResponse {
             client_state: Some(client_state),
             proof: proof.encode_to_vec(),
-            proof_height: Some(most_recent_height.into()),
+            proof_height: Some(height.into()),
         };
 
         Ok(tonic::Response::new(res))
@@ -119,14 +126,18 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ClientQuery for I
         let snapshot = self.0.latest_snapshot();
         let client_id = ClientId::from_str(&request.get_ref().client_id)
             .map_err(|e| tonic::Status::invalid_argument(format!("invalid client id: {e}")))?;
-        let most_recent_height = get_latest_verified_height(&snapshot, &client_id).await?;
+        let height = Height {
+            revision_number: snapshot
+                .get_revision_number()
+                .await
+                .map_err(|e| tonic::Status::aborted(e.to_string()))?,
+            revision_height: snapshot.version(),
+        };
 
         let (cs_opt, proof) = snapshot
             .get_with_proof(
                 IBC_COMMITMENT_PREFIX
-                    .apply_string(
-                        ClientConsensusStatePath::new(&client_id, &most_recent_height).to_string(),
-                    )
+                    .apply_string(ClientConsensusStatePath::new(&client_id, &height).to_string())
                     .as_bytes()
                     .to_vec(),
             )
@@ -151,7 +162,7 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ClientQuery for I
         let res = QueryConsensusStateResponse {
             consensus_state: Some(consensus_state),
             proof: proof.encode_to_vec(),
-            proof_height: Some(most_recent_height.into()),
+            proof_height: Some(height.into()),
         };
 
         Ok(tonic::Response::new(res))
@@ -261,29 +272,4 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ClientQuery for I
     {
         Err(tonic::Status::unimplemented("not implemented"))
     }
-}
-
-async fn get_latest_verified_height<C: ChainStateReadExt>(
-    snapshot: &C,
-    client_id: &ClientId,
-) -> Result<Height, tonic::Status> {
-    let verified_heights = snapshot
-        .get_verified_heights(&client_id)
-        .await
-        .map_err(|e| tonic::Status::aborted(format!("couldn't get verified heights: {e}")))?;
-
-    let Some(mut verified_heights) = verified_heights else {
-        return Err(tonic::Status::not_found(
-            "couldn't find verified heights for client: {client_id}",
-        ));
-    };
-
-    verified_heights.heights.sort();
-    if verified_heights.heights.is_empty() {
-        return Err(tonic::Status::not_found(
-            "verified heights for client were empty: {client_id}",
-        ));
-    }
-
-    Ok(verified_heights.heights.pop().expect("must be non-empty"))
 }
