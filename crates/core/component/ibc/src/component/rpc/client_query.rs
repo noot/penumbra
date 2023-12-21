@@ -126,13 +126,7 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ClientQuery for I
         let snapshot = self.0.latest_snapshot();
         let client_id = ClientId::from_str(&request.get_ref().client_id)
             .map_err(|e| tonic::Status::invalid_argument(format!("invalid client id: {e}")))?;
-        let height = Height {
-            revision_number: snapshot
-                .get_revision_number()
-                .await
-                .map_err(|e| tonic::Status::aborted(e.to_string()))?,
-            revision_height: snapshot.version(),
-        };
+        let height = get_latest_verified_height(&snapshot, &client_id).await?;
 
         let (cs_opt, proof) = snapshot
             .get_with_proof(
