@@ -120,8 +120,11 @@ pub trait ConsensusStateWriteExt: StateWrite + ChainStateReadExt {
         client_id: ClientId,
         consensus_state: TendermintConsensusState,
     ) -> Result<()> {
-        println!("putting verified consensus state for client {} at height {}", client_id, height);
-        
+        println!(
+            "putting verified consensus state for client {} at height {}",
+            client_id, height
+        );
+
         self.put(
             IBC_COMMITMENT_PREFIX
                 .apply_string(ClientConsensusStatePath::new(&client_id, &height).to_string()),

@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+
 use cnidarium_component::ChainStateReadExt;
 use ibc_proto::ibc::core::client::v1::query_server::Query as ClientQuery;
 use ibc_proto::ibc::core::client::v1::{
@@ -11,6 +12,7 @@ use ibc_proto::ibc::core::client::v1::{
     QueryUpgradedClientStateResponse, QueryUpgradedConsensusStateRequest,
     QueryUpgradedConsensusStateResponse,
 };
+
 use ibc_types::core::client::ClientId;
 use ibc_types::core::client::Height;
 use ibc_types::lightclients::tendermint::client_state::TENDERMINT_CLIENT_STATE_TYPE_URL;
@@ -118,7 +120,6 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ClientQuery for I
         let client_id = ClientId::from_str(&request.get_ref().client_id)
             .map_err(|e| tonic::Status::invalid_argument(format!("invalid client id: {e}")))?;
         let most_recent_height = get_latest_verified_height(&snapshot, &client_id).await?;
-        println!("query consensus_state most_recent_height: {:?}", most_recent_height);
 
         let (cs_opt, proof) = snapshot
             .get_with_proof(
@@ -262,30 +263,27 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ClientQuery for I
     }
 }
 
-async fn get_latest_verified_height<S: crate::component::client::StateReadExt>(
-    snapshot: &S,
+async fn get_latest_verified_height<C: ChainStateReadExt>(
+    snapshot: &C,
     client_id: &ClientId,
 ) -> Result<Height, tonic::Status> {
-    // let verified_heights = snapshot
-    //     .get_verified_heights(&client_id)
-    //     .await
-    //     .map_err(|e| tonic::Status::aborted(format!("couldn't get verified heights: {e}")))?;
-    // println!("get_latest_verified_height verified_heights: {:?}", verified_heights);
+    let verified_heights = snapshot
+        .get_verified_heights(&client_id)
+        .await
+        .map_err(|e| tonic::Status::aborted(format!("couldn't get verified heights: {e}")))?;
 
-    // let Some(mut verified_heights) = verified_heights else {
-    //     return Err(tonic::Status::not_found(
-    //         "couldn't find verified heights for client: {client_id}",
-    //     ));
-    // };
+    let Some(mut verified_heights) = verified_heights else {
+        return Err(tonic::Status::not_found(
+            "couldn't find verified heights for client: {client_id}",
+        ));
+    };
 
-    // verified_heights.heights.sort();
-    // if verified_heights.heights.is_empty() {
-    //     return Err(tonic::Status::not_found(
-    //         "verified heights for client were empty: {client_id}",
-    //     ));
-    // }
-
-    let last = snapshot.prev_verified_consensus_state(&client_id).await?;
+    verified_heights.heights.sort();
+    if verified_heights.heights.is_empty() {
+        return Err(tonic::Status::not_found(
+            "verified heights for client were empty: {client_id}",
+        ));
+    }
 
     Ok(verified_heights.heights.pop().expect("must be non-empty"))
 }
