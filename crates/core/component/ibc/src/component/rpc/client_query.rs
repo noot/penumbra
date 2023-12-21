@@ -273,3 +273,28 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ClientQuery for I
         Err(tonic::Status::unimplemented("not implemented"))
     }
 }
+
+async fn get_latest_verified_height<C: ChainStateReadExt>(
+    snapshot: &C,
+    client_id: &ClientId,
+) -> Result<Height, tonic::Status> {
+    let verified_heights = snapshot
+        .get_verified_heights(&client_id)
+        .await
+        .map_err(|e| tonic::Status::aborted(format!("couldn't get verified heights: {e}")))?;
+
+    let Some(mut verified_heights) = verified_heights else {
+        return Err(tonic::Status::not_found(
+            "couldn't find verified heights for client: {client_id}",
+        ));
+    };
+
+    verified_heights.heights.sort();
+    if verified_heights.heights.is_empty() {
+        return Err(tonic::Status::not_found(
+            "verified heights for client were empty: {client_id}",
+        ));
+    }
+
+    Ok(verified_heights.heights.pop().expect("must be non-empty"))
+}
