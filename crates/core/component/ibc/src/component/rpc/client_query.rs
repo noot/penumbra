@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-
+use cnidarium_component::ChainStateReadExt;
 use ibc_proto::ibc::core::client::v1::query_server::Query as ClientQuery;
 use ibc_proto::ibc::core::client::v1::{
     ConsensusStateWithHeight, IdentifiedClientState, QueryClientParamsRequest,
@@ -11,7 +11,6 @@ use ibc_proto::ibc::core::client::v1::{
     QueryUpgradedClientStateResponse, QueryUpgradedConsensusStateRequest,
     QueryUpgradedConsensusStateResponse,
 };
-
 use ibc_types::core::client::ClientId;
 use ibc_types::core::client::Height;
 use ibc_types::lightclients::tendermint::client_state::TENDERMINT_CLIENT_STATE_TYPE_URL;
@@ -19,19 +18,18 @@ use ibc_types::lightclients::tendermint::consensus_state::TENDERMINT_CONSENSUS_S
 use ibc_types::path::ClientConsensusStatePath;
 use ibc_types::path::ClientStatePath;
 use ibc_types::DomainType;
-use penumbra_chain::component::StateReadExt;
 
 use std::str::FromStr;
 use tonic::{Response, Status};
 
+use crate::component::rpc::Snapshot;
+use crate::component::rpc::{IbcQuery, Storage};
 use crate::component::ClientStateReadExt;
 use crate::prefix::MerklePrefixExt;
 use crate::IBC_COMMITMENT_PREFIX;
 
-use super::IbcQuery;
-
 #[async_trait]
-impl ClientQuery for IbcQuery {
+impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ClientQuery for IbcQuery<C, S> {
     async fn client_state(
         &self,
         request: tonic::Request<QueryClientStateRequest>,
@@ -40,6 +38,8 @@ impl ClientQuery for IbcQuery {
         let client_id = ClientId::from_str(&request.get_ref().client_id)
             .map_err(|e| tonic::Status::invalid_argument(format!("invalid client id: {e}")))?;
         let height = Height {
+            // TODO: need to pass in the `SnapshotWrapper` type somehow,
+            // need to make a generic arg that will wrap the snapshot?
             revision_number: snapshot
                 .get_revision_number()
                 .await

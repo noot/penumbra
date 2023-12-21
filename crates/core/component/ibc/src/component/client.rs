@@ -8,12 +8,12 @@ use ibc_types::core::client::Height;
 use ibc_types::path::{ClientConsensusStatePath, ClientStatePath, ClientTypePath};
 
 use cnidarium::{StateRead, StateWrite};
+use cnidarium_component::ChainStateReadExt;
 use ibc_types::lightclients::tendermint::{
     client_state::ClientState as TendermintClientState,
     consensus_state::ConsensusState as TendermintConsensusState,
     header::Header as TendermintHeader,
 };
-use penumbra_chain::component::StateReadExt as _;
 use penumbra_proto::{StateReadProto, StateWriteProto};
 
 use crate::component::client_counter::{ClientCounter, VerifiedHeights};
@@ -113,7 +113,53 @@ pub(crate) trait Ics2ClientExt: StateWrite {
 impl<T: StateWrite + ?Sized> Ics2ClientExt for T {}
 
 #[async_trait]
-pub trait StateWriteExt: StateWrite + StateReadExt {
+pub trait ConsensusStateWriteExt: StateWrite + ChainStateReadExt {
+    async fn put_verified_consensus_state(
+        &mut self,
+        height: Height,
+        client_id: ClientId,
+        consensus_state: TendermintConsensusState,
+    ) -> Result<()> {
+        self.put(
+            IBC_COMMITMENT_PREFIX
+                .apply_string(ClientConsensusStatePath::new(&client_id, &height).to_string()),
+            consensus_state,
+        );
+
+        let current_height = self.get_block_height().await?;
+        let current_time: ibc_types::timestamp::Timestamp =
+            self.get_block_timestamp().await?.into();
+
+        self.put_proto::<u64>(
+            state_key::client_processed_times(&client_id, &height),
+            current_time.nanoseconds(),
+        );
+
+        self.put(
+            state_key::client_processed_heights(&client_id, &height),
+            ibc_types::core::client::Height::new(0, current_height)?,
+        );
+
+        // update verified heights
+        let mut verified_heights =
+            self.get_verified_heights(&client_id)
+                .await?
+                .unwrap_or(VerifiedHeights {
+                    heights: Vec::new(),
+                });
+
+        verified_heights.heights.push(height);
+
+        self.put_verified_heights(&client_id, verified_heights);
+
+        Ok(())
+    }
+}
+
+impl<T: StateWrite + ChainStateReadExt + ?Sized> ConsensusStateWriteExt for T {}
+
+#[async_trait]
+pub trait StateWriteExt: StateWrite {
     fn put_client_counter(&mut self, counter: ClientCounter) {
         self.put("ibc_client_counter".into(), counter);
     }
@@ -154,47 +200,6 @@ pub trait StateWriteExt: StateWrite + StateReadExt {
             format!("penumbra_consensus_states/{height}"),
             consensus_state,
         );
-    }
-
-    async fn put_verified_consensus_state(
-        &mut self,
-        height: Height,
-        client_id: ClientId,
-        consensus_state: TendermintConsensusState,
-    ) -> Result<()> {
-        self.put(
-            IBC_COMMITMENT_PREFIX
-                .apply_string(ClientConsensusStatePath::new(&client_id, &height).to_string()),
-            consensus_state,
-        );
-
-        let current_height = self.get_block_height().await?;
-        let current_time: ibc_types::timestamp::Timestamp =
-            self.get_block_timestamp().await?.into();
-
-        self.put_proto::<u64>(
-            state_key::client_processed_times(&client_id, &height),
-            current_time.nanoseconds(),
-        );
-
-        self.put(
-            state_key::client_processed_heights(&client_id, &height),
-            ibc_types::core::client::Height::new(0, current_height)?,
-        );
-
-        // update verified heights
-        let mut verified_heights =
-            self.get_verified_heights(&client_id)
-                .await?
-                .unwrap_or(VerifiedHeights {
-                    heights: Vec::new(),
-                });
-
-        verified_heights.heights.push(height);
-
-        self.put_verified_heights(&client_id, verified_heights);
-
-        Ok(())
     }
 }
 
@@ -370,9 +375,9 @@ mod tests {
 
     use super::*;
     use cnidarium::{ArcStateDeltaExt, StateDelta};
-    use cnidarium_component::ActionHandler;
     use ibc_types::core::client::msgs::MsgUpdateClient;
     use ibc_types::{core::client::msgs::MsgCreateClient, DomainType};
+    use penumbra_chain::component::StateReadExt as _;
     use penumbra_chain::component::StateWriteExt;
     use std::str::FromStr;
     use tendermint::Time;
@@ -385,6 +390,11 @@ mod tests {
         MsgAcknowledgement, MsgChannelCloseConfirm, MsgChannelCloseInit, MsgChannelOpenAck,
         MsgChannelOpenConfirm, MsgChannelOpenInit, MsgChannelOpenTry, MsgRecvPacket, MsgTimeout,
     };
+
+    #[derive(
+        wrapper_derive::StateRead, wrapper_derive::StateWrite, wrapper_derive::ChainStateReadExt,
+    )]
+    struct StateDeltaWrapper<'a, S: StateWrite>(&'a mut S);
 
     struct MockAppHandler {}
 
@@ -539,7 +549,9 @@ mod tests {
         create_client_action.check_stateless(()).await?;
         create_client_action.check_stateful(state.clone()).await?;
         let mut state_tx = state.try_begin_transaction().unwrap();
-        create_client_action.execute(&mut state_tx).await?;
+        create_client_action
+            .execute(StateDeltaWrapper(&mut state_tx))
+            .await?;
         state_tx.apply();
 
         // Check that state reflects +1 client apps registered.
@@ -549,7 +561,9 @@ mod tests {
         update_client_action.check_stateless(()).await?;
         update_client_action.check_stateful(state.clone()).await?;
         let mut state_tx = state.try_begin_transaction().unwrap();
-        update_client_action.execute(&mut state_tx).await?;
+        update_client_action
+            .execute(StateDeltaWrapper(&mut state_tx))
+            .await?;
         state_tx.apply();
 
         // We've had one client update, yes. What about second client update?
@@ -567,7 +581,9 @@ mod tests {
             .check_stateful(state.clone())
             .await?;
         let mut state_tx = state.try_begin_transaction().unwrap();
-        second_update_client_action.execute(&mut state_tx).await?;
+        second_update_client_action
+            .execute(StateDeltaWrapper(&mut state_tx))
+            .await?;
         state_tx.apply();
 
         Ok(())

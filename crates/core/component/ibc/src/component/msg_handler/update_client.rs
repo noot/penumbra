@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use cnidarium::{StateRead, StateWrite};
+use cnidarium_component::ChainStateReadExt;
 use ibc_types::{
     core::{client::events::UpdateClient, client::msgs::MsgUpdateClient, client::ClientId},
     lightclients::tendermint::client_state::ClientState as TendermintClientState,
@@ -9,7 +10,6 @@ use ibc_types::{
         consensus_state::ConsensusState as TendermintConsensusState, TENDERMINT_CLIENT_TYPE,
     },
 };
-use penumbra_chain::component::StateReadExt as _;
 use tendermint::validator;
 use tendermint_light_client_verifier::{
     types::{TrustedBlockState, UntrustedBlockState},
@@ -17,7 +17,9 @@ use tendermint_light_client_verifier::{
 };
 
 use crate::component::{
-    client::{Ics2ClientExt as _, StateReadExt as _, StateWriteExt as _},
+    client::{
+        ConsensusStateWriteExt as _, Ics2ClientExt as _, StateReadExt as _, StateWriteExt as _,
+    },
     client_counter::ics02_validation,
     MsgHandler,
 };
@@ -30,7 +32,7 @@ impl MsgHandler for MsgUpdateClient {
         Ok(())
     }
 
-    async fn try_execute<S: StateWrite, H>(&self, mut state: S) -> Result<()> {
+    async fn try_execute<S: StateWrite + ChainStateReadExt, H>(&self, mut state: S) -> Result<()> {
         // Optimization: no-op if the update is already committed.  We no-op
         // to Ok(()) rather than erroring to avoid having two "racing" relay
         // transactions fail just because they both contain the same client
@@ -191,8 +193,8 @@ async fn update_is_already_committed<S: StateRead>(
     }
 }
 
-async fn client_is_not_expired<S: StateRead>(
-    state: S,
+async fn client_is_not_expired<S: ChainStateReadExt>(
+    state: &S,
     client_id: &ClientId,
     client_state: &TendermintClientState,
 ) -> anyhow::Result<()> {

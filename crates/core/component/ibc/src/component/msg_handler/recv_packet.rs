@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use cnidarium::StateWrite;
+use cnidarium_component::ChainStateReadExt;
 use ibc_types::core::{
     channel::{
         channel::{Order as ChannelOrder, State as ChannelState},
@@ -11,7 +12,6 @@ use ibc_types::core::{
     client::Height as IBCHeight,
     connection::State as ConnectionState,
 };
-use penumbra_chain::component::StateReadExt;
 
 use crate::component::{
     app_handler::{AppHandlerCheck, AppHandlerExecute},
@@ -29,7 +29,10 @@ impl MsgHandler for MsgRecvPacket {
         Ok(())
     }
 
-    async fn try_execute<S: StateWrite, H: AppHandlerCheck + AppHandlerExecute>(
+    async fn try_execute<
+        S: StateWrite + ChainStateReadExt,
+        H: AppHandlerCheck + AppHandlerExecute,
+    >(
         &self,
         mut state: S,
     ) -> Result<()> {

@@ -29,6 +29,7 @@ use tracing::Instrument;
 
 use crate::action_handler::ActionHandler;
 use crate::params::AppParameters;
+use crate::state_delta_wrapper::ArcStateDeltaWrapper;
 use crate::{genesis, DaoStateReadExt};
 
 pub mod state_key;
@@ -208,11 +209,11 @@ impl App {
             }
         }
 
-        // Run each of the begin block handlers for each component, in sequence:
+        // Run each of the begin block handlers for each component, in sequence.
         let mut arc_state_tx = Arc::new(state_tx);
         ShieldedPool::begin_block(&mut arc_state_tx, begin_block).await;
         Distributions::begin_block(&mut arc_state_tx, begin_block).await;
-        IBCComponent::begin_block(&mut arc_state_tx, begin_block).await;
+        IBCComponent::begin_block(&mut ArcStateDeltaWrapper(&mut arc_state_tx), begin_block).await;
         Governance::begin_block(&mut arc_state_tx, begin_block).await;
         Staking::begin_block(&mut arc_state_tx, begin_block).await;
         Fee::begin_block(&mut arc_state_tx, begin_block).await;
