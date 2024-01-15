@@ -25,8 +25,8 @@ use crate::component::ConnectionStateReadExt;
 use crate::prefix::MerklePrefixExt;
 use crate::IBC_COMMITMENT_PREFIX;
 
-use super::IbcQuery;
 use super::utils::height_from_str;
+use super::IbcQuery;
 
 #[async_trait]
 impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ConnectionQuery for IbcQuery<C, S> {
@@ -46,18 +46,24 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ConnectionQuery f
 
         let (snapshot, height) = if height_str == "0" {
             let snapshot = self.0.latest_snapshot();
-            let height = snapshot.get_block_height().await.map_err(|e| {
-                tonic::Status::aborted(format!("couldn't get block height: {e}"))
-            })? as u64;
-            (snapshot, Height {
-                revision_number: 0,
-                revision_height: height,
-            })
+            let height =
+                snapshot.get_block_height().await.map_err(|e| {
+                    tonic::Status::aborted(format!("couldn't get block height: {e}"))
+                })? as u64;
+            (
+                snapshot,
+                Height {
+                    revision_number: 0,
+                    revision_height: height,
+                },
+            )
         } else {
             let height = height_from_str(height_str)
-            .map_err(|e| tonic::Status::aborted(format!("couldn't get snapshot: {e}")))?;
+                .map_err(|e| tonic::Status::aborted(format!("couldn't get snapshot: {e}")))?;
 
-            let snapshot = self.0.snapshot(height.revision_height as u64)
+            let snapshot = self
+                .0
+                .snapshot(height.revision_height as u64)
                 .ok_or(tonic::Status::aborted(format!("invalid height")))?;
 
             (snapshot, height)

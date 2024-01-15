@@ -1,5 +1,5 @@
 use anyhow::anyhow;
-use ibc_proto::ibc::core::client::v1::{Height};
+use ibc_proto::ibc::core::client::v1::Height;
 
 pub(crate) fn height_from_str(value: &str) -> anyhow::Result<Height> {
     let split: Vec<&str> = value.split('-').collect();

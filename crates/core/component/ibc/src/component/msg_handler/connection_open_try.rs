@@ -92,14 +92,6 @@ impl MsgHandler for MsgConnectionOpenTry {
             anyhow::bail!("client is frozen");
         }
 
-        // TODO: why is hermes using a lower height...
-        //let height = state.prev_verified_consensus_state(&self.client_id_on_b, &self.proofs_height_on_a).await?;
-        println!("proofs height: {:?}", self.proofs_height_on_a);
-        println!(
-            "client state latest height: {:?}",
-            trusted_client_state.latest_height
-        );
-
         // get the stored consensus state for the counterparty
         let trusted_consensus_state = state
             .get_verified_consensus_state(&self.proofs_height_on_a, &self.client_id_on_b)
