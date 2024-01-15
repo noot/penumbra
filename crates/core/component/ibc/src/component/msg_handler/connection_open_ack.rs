@@ -12,8 +12,8 @@ use ibc_types::path::{ClientConsensusStatePath, ClientStatePath, ConnectionPath}
 use crate::{
     component::{
         client::StateReadExt as _,
-        client_counter::validate_penumbra_client_state,
         connection::{StateReadExt as _, StateWriteExt as _},
+        ics02_validation::validate_penumbra_client_state,
         proof_verification, MsgHandler,
     },
     IBC_COMMITMENT_PREFIX,

@@ -17,9 +17,9 @@ use ibc_types::{
 
 use crate::component::{
     client::StateReadExt as _,
-    client_counter::validate_penumbra_client_state,
     connection::{StateReadExt as _, StateWriteExt as _},
     connection_counter::SUPPORTED_VERSIONS,
+    ics02_validation::validate_penumbra_client_state,
     MsgHandler,
 };
 

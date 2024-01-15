@@ -20,8 +20,7 @@ use crate::component::{
     client::{
         ConsensusStateWriteExt as _, Ics2ClientExt as _, StateReadExt as _, StateWriteExt as _,
     },
-    client_counter::ics02_validation,
-    MsgHandler,
+    ics02_validation, MsgHandler,
 };
 
 #[async_trait]
