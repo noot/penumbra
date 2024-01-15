@@ -12,11 +12,10 @@ use ibc_proto::ibc::core::client::v1::{
     QueryUpgradedClientStateResponse, QueryUpgradedConsensusStateRequest,
     QueryUpgradedConsensusStateResponse,
 };
+use prost::Message;
 
 use ibc_types::core::client::ClientId;
 use ibc_types::core::client::Height;
-use ibc_types::lightclients::tendermint::client_state::TENDERMINT_CLIENT_STATE_TYPE_URL;
-use ibc_types::lightclients::tendermint::consensus_state::TENDERMINT_CONSENSUS_STATE_TYPE_URL;
 use ibc_types::path::ClientConsensusStatePath;
 use ibc_types::path::ClientStatePath;
 use ibc_types::DomainType;
@@ -37,8 +36,6 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ClientQuery for I
         &self,
         request: tonic::Request<QueryClientStateRequest>,
     ) -> std::result::Result<Response<QueryClientStateResponse>, Status> {
-        println!("client_state {:?}", request);
-
         let Some(height_val) = request.metadata().get("height") else {
             return Err(tonic::Status::aborted("missing height"));
         };
@@ -46,8 +43,6 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ClientQuery for I
         let height_str: &str = height_val
             .to_str()
             .map_err(|e| tonic::Status::aborted(format!("invalid height: {e}")))?;
-
-        println!("height_str {:?}", height_str);
 
         let (snapshot, height) = if height_str == "0" {
             let snapshot = self.0.latest_snapshot();
@@ -93,23 +88,13 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ClientQuery for I
             .await
             .map_err(|e| tonic::Status::aborted(format!("couldn't get client: {e}")))?;
 
-        // Client state may be None, which we'll convert to a NotFound response.
-        let client_state = match cs_opt {
-            // If found, convert to a suitable type to match
-            // https://docs.rs/ibc-proto/0.39.1/ibc_proto/ibc/core/client/v1/struct.QueryClientStateResponse.html
-            Some(c) => ibc_proto::google::protobuf::Any {
-                type_url: TENDERMINT_CLIENT_STATE_TYPE_URL.to_string(),
-                value: c,
-            },
-            None => {
-                return Err(tonic::Status::not_found(format!(
-                    "couldn't find client: {client_id}"
-                )))
-            }
-        };
+        let client_state = cs_opt
+            .map(|cs_opt| ibc_proto::google::protobuf::Any::decode(cs_opt.as_ref()))
+            .transpose()
+            .map_err(|e| tonic::Status::aborted(format!("couldn't decode client state: {e}")))?;
 
         let res = QueryClientStateResponse {
-            client_state: Some(client_state),
+            client_state,
             proof: proof.encode_to_vec(),
             proof_height: Some(height.into()),
         };
@@ -122,8 +107,6 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ClientQuery for I
         &self,
         _request: tonic::Request<QueryClientStatesRequest>,
     ) -> std::result::Result<tonic::Response<QueryClientStatesResponse>, tonic::Status> {
-        println!("client_states {:?}", _request);
-
         let snapshot = self.0.latest_snapshot();
 
         let client_counter = snapshot
@@ -158,9 +141,7 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ClientQuery for I
     async fn consensus_state(
         &self,
         request: tonic::Request<QueryConsensusStateRequest>,
-    ) -> std::result::Result<tonic::Response<QueryConsensusStateResponse>, tonic::Status> {
-        println!("consensus_state {:?}", request);
-
+    ) -> std::result::Result<tonic::Response<QueryConsensusStateResponse>, tonic::Status> 
         let Some(height_val) = request.metadata().get("height") else {
             return Err(tonic::Status::aborted("missing height"));
         };
@@ -168,8 +149,6 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ClientQuery for I
         let height_str: &str = height_val
             .to_str()
             .map_err(|e| tonic::Status::aborted(format!("invalid height: {e}")))?;
-
-        println!("height_str {:?}", height_str);
 
         let (snapshot, query_height) = if height_str == "0" {
             let snapshot = self.0.latest_snapshot();
@@ -191,14 +170,12 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ClientQuery for I
                 tonic::Status::aborted(format!("couldn't get block height: {e}"))
             })? as u64;
 
-            println!("block height stored in snapshot {:?}", snapshot_height);
             (snapshot, height.try_into().map_err(|e| tonic::Status::aborted(format!("invalid height: {e}")))?)
         };
 
-        //let snapshot = self.0.latest_snapshot();
         let client_id = ClientId::from_str(&request.get_ref().client_id)
             .map_err(|e| tonic::Status::invalid_argument(format!("invalid client id: {e}")))?;
-        let consensus_height = if request.get_ref().latest_height {
+        let height = if request.get_ref().latest_height {
             get_latest_verified_height(&snapshot, &client_id).await?
         } else {
             Height {
@@ -207,35 +184,23 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ClientQuery for I
             }
         };
 
-        println!("getting consensus_state at counterparty height {:?} query height {:?}", consensus_height, query_height);
-
         let (cs_opt, proof) = snapshot
             .get_with_proof(
                 IBC_COMMITMENT_PREFIX
-                    .apply_string(ClientConsensusStatePath::new(&client_id, &consensus_height).to_string())
+                    .apply_string(ClientConsensusStatePath::new(&client_id, &height).to_string())
                     .as_bytes()
                     .to_vec(),
             )
             .await
-            .map_err(|e| tonic::Status::aborted(format!("couldn't get client: {e}")))?;
+            .map_err(|e| tonic::Status::aborted(format!("couldn't get consensus state: {e}")))?;
 
-        // if state is None, convert to a NotFound response.
-        let consensus_state = match cs_opt {
-            // If found, convert to a suitable type to match
-            // https://docs.rs/ibc-proto/0.39.1/ibc_proto/ibc/core/client/v1/struct.QueryConsensusStateResponse.html
-            Some(c) => ibc_proto::google::protobuf::Any {
-                type_url: TENDERMINT_CONSENSUS_STATE_TYPE_URL.to_string(),
-                value: c,
-            },
-            None => {
-                return Err(tonic::Status::not_found(format!(
-                    "couldn't find client: {client_id}"
-                )))
-            }
-        };
+        let consensus_state = cs_opt
+            .map(|cs_opt| ibc_proto::google::protobuf::Any::decode(cs_opt.as_ref()))
+            .transpose()
+            .map_err(|e| tonic::Status::aborted(format!("couldn't decode consensus state: {e}")))?;
 
         let res = QueryConsensusStateResponse {
-            consensus_state: Some(consensus_state),
+            consensus_state,
             proof: proof.encode_to_vec(),
             proof_height: Some(query_height.into()),
         };
@@ -249,8 +214,6 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ClientQuery for I
         &self,
         request: tonic::Request<QueryConsensusStatesRequest>,
     ) -> std::result::Result<tonic::Response<QueryConsensusStatesResponse>, tonic::Status> {
-        println!("consensus_states {:?}", request);
-
         let snapshot = self.0.latest_snapshot();
         let client_id = ClientId::from_str(&request.get_ref().client_id)
             .map_err(|e| tonic::Status::invalid_argument(format!("invalid client id: {e}")))?;
@@ -293,8 +256,6 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ClientQuery for I
         request: tonic::Request<QueryConsensusStateHeightsRequest>,
     ) -> std::result::Result<tonic::Response<QueryConsensusStateHeightsResponse>, tonic::Status>
     {
-        println!("consensus_state_heights {:?}", request);
-
         let snapshot = self.0.latest_snapshot();
         let client_id = ClientId::from_str(&request.get_ref().client_id)
             .map_err(|e| tonic::Status::invalid_argument(format!("invalid client id: {e}")))?;

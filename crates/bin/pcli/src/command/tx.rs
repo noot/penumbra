@@ -9,7 +9,19 @@ use std::{
 use anyhow::{Context, Result};
 use ark_ff::UniformRand;
 use decaf377::{Fq, Fr};
-use ibc_types::core::{channel::ChannelId, client::Height as IbcHeight};
+use ibc_proto::ibc::core::client::v1::{
+    query_client::QueryClient as IbcClientQueryClient, QueryClientStateRequest,
+};
+use ibc_proto::ibc::core::connection::v1::query_client::QueryClient as IbcConnectionQueryClient;
+use ibc_proto::ibc::core::{
+    channel::v1::{query_client::QueryClient as IbcChannelQueryClient, QueryChannelRequest},
+    connection::v1::QueryConnectionRequest,
+};
+use ibc_types::core::{
+    channel::{ChannelId, PortId},
+    client::Height as IbcHeight,
+};
+use ibc_types::lightclients::tendermint::client_state::ClientState as TendermintClientState;
 use rand_core::OsRng;
 use regex::Regex;
 
@@ -179,8 +191,8 @@ pub enum TxCmd {
         /// height, e.g. `5-1000000` means "chain revision 5, block height of 1000000".
         /// You must know the chain id of the counterparty chain beforehand, e.g. `osmosis-testnet-5`,
         /// to know the revision number.
-        #[clap(long, default_value = "0-0", display_order = 100)]
-        timeout_height: IbcHeight,
+        #[clap(long, display_order = 100)]
+        timeout_height: Option<IbcHeight>,
         /// Timestamp, specified in epoch time, after which the withdrawal will be considered
         /// invalid if not already relayed.
         #[clap(long, default_value = "0", display_order = 150)]
@@ -280,10 +292,8 @@ impl TxCmd {
                     .payment_address((*from).into())
                     .0;
 
-                let memo_plaintext = MemoPlaintext {
-                    return_address,
-                    text: memo.clone().unwrap_or_default(),
-                };
+                let memo_plaintext =
+                    MemoPlaintext::new(return_address, memo.clone().unwrap_or_default())?;
 
                 let mut planner = Planner::new(OsRng);
                 planner.set_gas_prices(gas_prices);
@@ -842,13 +852,75 @@ impl TxCmd {
                     .full_viewing_key
                     .ephemeral_address(OsRng, AddressIndex::from(*source));
 
+                let timeout_height = match timeout_height {
+                    Some(h) => h.clone(),
+                    None => {
+                        // look up the height for the counterparty and add 2 days of block time
+                        // (assuming 10 seconds per block) to it
+
+                        // look up the client state from the channel by looking up channel id -> connection id -> client state
+                        let mut ibc_channel_client =
+                            IbcChannelQueryClient::new(app.pd_channel().await?);
+
+                        let req = QueryChannelRequest {
+                            port_id: PortId::transfer().to_string(),
+                            channel_id: format!("channel-{}", channel),
+                        };
+
+                        let channel = ibc_channel_client
+                            .channel(req)
+                            .await?
+                            .into_inner()
+                            .channel
+                            .ok_or_else(|| anyhow::anyhow!("channel not found"))?;
+
+                        let connection_id = channel.connection_hops[0].clone();
+
+                        let mut ibc_connection_client =
+                            IbcConnectionQueryClient::new(app.pd_channel().await?);
+
+                        let req = QueryConnectionRequest {
+                            connection_id: connection_id.clone(),
+                        };
+                        let connection = ibc_connection_client
+                            .connection(req)
+                            .await?
+                            .into_inner()
+                            .connection
+                            .ok_or_else(|| anyhow::anyhow!("connection not found"))?;
+
+                        let mut ibc_client_client =
+                            IbcClientQueryClient::new(app.pd_channel().await?);
+                        let req = QueryClientStateRequest {
+                            client_id: connection.client_id,
+                        };
+                        let client_state = ibc_client_client
+                            .client_state(req)
+                            .await?
+                            .into_inner()
+                            .client_state
+                            .ok_or_else(|| anyhow::anyhow!("client state not found"))?;
+
+                        let tm_client_state = TendermintClientState::try_from(client_state)?;
+
+                        let last_update_height = tm_client_state.latest_height;
+
+                        // 10 seconds per block, 2 days
+                        let timeout_n_blocks = ((24 * 60 * 60) / 10) * 2;
+
+                        IbcHeight {
+                            revision_number: last_update_height.revision_number,
+                            revision_height: last_update_height.revision_height + timeout_n_blocks,
+                        }
+                    }
+                };
+
                 // get the current time on the local machine
                 let current_time_u64_ms = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .expect("Time went backwards")
                     .as_nanos() as u64;
 
-                let timeout_height = *timeout_height;
                 let mut timeout_timestamp = *timeout_timestamp;
                 if timeout_timestamp == 0u64 {
                     // add 2 days to current time
