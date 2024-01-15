@@ -29,7 +29,7 @@ use crate::component::rpc::{IbcQuery, Storage};
 use crate::component::ClientStateReadExt;
 use crate::prefix::MerklePrefixExt;
 use crate::IBC_COMMITMENT_PREFIX;
-use penumbra_chain::component::StateReadExt as _;
+use super::utils::height_from_str;
 
 #[async_trait]
 impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ClientQuery for IbcQuery<C, S> {
@@ -37,16 +37,50 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ClientQuery for I
         &self,
         request: tonic::Request<QueryClientStateRequest>,
     ) -> std::result::Result<Response<QueryClientStateResponse>, Status> {
-        let snapshot = self.0.latest_snapshot();
+        println!("client_state {:?}", request);
+
+        let Some(height_val) = request.metadata().get("height") else {
+            return Err(tonic::Status::aborted("missing height"));
+        };
+
+        let height_str: &str = height_val
+            .to_str()
+            .map_err(|e| tonic::Status::aborted(format!("invalid height: {e}")))?;
+
+        println!("height_str {:?}", height_str);
+
+        let (snapshot, height) = if height_str == "0" {
+            let snapshot = self.0.latest_snapshot();
+            let height = snapshot.get_block_height().await.map_err(|e| {
+                tonic::Status::aborted(format!("couldn't get block height: {e}"))
+            })? as u64;
+            (snapshot, Height {
+                revision_number: 0,
+                revision_height: height,
+            })
+        } else {
+            let height = height_from_str(height_str)
+            .map_err(|e| tonic::Status::aborted(format!("couldn't get snapshot: {e}")))?;
+
+            let snapshot = self.0.snapshot(height.revision_height as u64)
+                .ok_or(tonic::Status::aborted(format!("invalid height")))?;
+
+            (snapshot, height.try_into().map_err(|e| tonic::Status::aborted(format!("invalid height: {e}")))?)
+        };
+
+        //let snapshot = self.0.latest_snapshot();
         let client_id = ClientId::from_str(&request.get_ref().client_id)
             .map_err(|e| tonic::Status::invalid_argument(format!("invalid client id: {e}")))?;
-        let height = Height {
-            revision_number: snapshot
-                .get_revision_number()
-                .await
-                .map_err(|e| tonic::Status::aborted(e.to_string()))?,
-            revision_height: snapshot.version(),
-        };
+        // let height = Height {
+        //     revision_number: snapshot
+        //         .get_revision_number()
+        //         .await
+        //         .map_err(|e| tonic::Status::aborted(e.to_string()))?,
+        //     revision_height: snapshot
+        //         .get_block_height()
+        //         .await
+        //         .map_err(|e| tonic::Status::aborted(format!("couldn't get block height: {e}")))?,
+        // };
 
         // Query for client_state and associated proof.
         let (cs_opt, proof) = snapshot
@@ -88,6 +122,8 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ClientQuery for I
         &self,
         _request: tonic::Request<QueryClientStatesRequest>,
     ) -> std::result::Result<tonic::Response<QueryClientStatesResponse>, tonic::Status> {
+        println!("client_states {:?}", _request);
+
         let snapshot = self.0.latest_snapshot();
 
         let client_counter = snapshot
@@ -123,10 +159,46 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ClientQuery for I
         &self,
         request: tonic::Request<QueryConsensusStateRequest>,
     ) -> std::result::Result<tonic::Response<QueryConsensusStateResponse>, tonic::Status> {
-        let snapshot = self.0.latest_snapshot();
+        println!("consensus_state {:?}", request);
+
+        let Some(height_val) = request.metadata().get("height") else {
+            return Err(tonic::Status::aborted("missing height"));
+        };
+
+        let height_str: &str = height_val
+            .to_str()
+            .map_err(|e| tonic::Status::aborted(format!("invalid height: {e}")))?;
+
+        println!("height_str {:?}", height_str);
+
+        let (snapshot, query_height) = if height_str == "0" {
+            let snapshot = self.0.latest_snapshot();
+            let height = snapshot.get_block_height().await.map_err(|e| {
+                tonic::Status::aborted(format!("couldn't get block height: {e}"))
+            })? as u64;
+            (snapshot, Height {
+                revision_number: 0,
+                revision_height: height,
+            })
+        } else {
+            let height = height_from_str(height_str)
+            .map_err(|e| tonic::Status::aborted(format!("couldn't get snapshot: {e}")))?;
+
+            let snapshot = self.0.snapshot(height.revision_height as u64)
+                .ok_or(tonic::Status::aborted(format!("invalid height")))?;
+
+            let snapshot_height = snapshot.get_block_height().await.map_err(|e| {
+                tonic::Status::aborted(format!("couldn't get block height: {e}"))
+            })? as u64;
+
+            println!("block height stored in snapshot {:?}", snapshot_height);
+            (snapshot, height.try_into().map_err(|e| tonic::Status::aborted(format!("invalid height: {e}")))?)
+        };
+
+        //let snapshot = self.0.latest_snapshot();
         let client_id = ClientId::from_str(&request.get_ref().client_id)
             .map_err(|e| tonic::Status::invalid_argument(format!("invalid client id: {e}")))?;
-        let height = if request.get_ref().latest_height {
+        let consensus_height = if request.get_ref().latest_height {
             get_latest_verified_height(&snapshot, &client_id).await?
         } else {
             Height {
@@ -135,10 +207,12 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ClientQuery for I
             }
         };
 
+        println!("getting consensus_state at counterparty height {:?} query height {:?}", consensus_height, query_height);
+
         let (cs_opt, proof) = snapshot
             .get_with_proof(
                 IBC_COMMITMENT_PREFIX
-                    .apply_string(ClientConsensusStatePath::new(&client_id, &height).to_string())
+                    .apply_string(ClientConsensusStatePath::new(&client_id, &consensus_height).to_string())
                     .as_bytes()
                     .to_vec(),
             )
@@ -163,7 +237,7 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ClientQuery for I
         let res = QueryConsensusStateResponse {
             consensus_state: Some(consensus_state),
             proof: proof.encode_to_vec(),
-            proof_height: Some(height.into()),
+            proof_height: Some(query_height.into()),
         };
 
         Ok(tonic::Response::new(res))
@@ -175,6 +249,8 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ClientQuery for I
         &self,
         request: tonic::Request<QueryConsensusStatesRequest>,
     ) -> std::result::Result<tonic::Response<QueryConsensusStatesResponse>, tonic::Status> {
+        println!("consensus_states {:?}", request);
+
         let snapshot = self.0.latest_snapshot();
         let client_id = ClientId::from_str(&request.get_ref().client_id)
             .map_err(|e| tonic::Status::invalid_argument(format!("invalid client id: {e}")))?;
@@ -217,6 +293,8 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ClientQuery for I
         request: tonic::Request<QueryConsensusStateHeightsRequest>,
     ) -> std::result::Result<tonic::Response<QueryConsensusStateHeightsResponse>, tonic::Status>
     {
+        println!("consensus_state_heights {:?}", request);
+
         let snapshot = self.0.latest_snapshot();
         let client_id = ClientId::from_str(&request.get_ref().client_id)
             .map_err(|e| tonic::Status::invalid_argument(format!("invalid client id: {e}")))?;

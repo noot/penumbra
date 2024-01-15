@@ -1,7 +1,6 @@
 use async_trait::async_trait;
 
 use cnidarium_component::ChainStateReadExt;
-use ibc_proto::ibc::core::client;
 use ibc_proto::ibc::core::client::v1::{Height, IdentifiedClientState};
 use ibc_proto::ibc::core::connection::v1::query_server::Query as ConnectionQuery;
 use ibc_proto::ibc::core::connection::v1::{
@@ -27,6 +26,7 @@ use crate::prefix::MerklePrefixExt;
 use crate::IBC_COMMITMENT_PREFIX;
 
 use super::IbcQuery;
+use super::utils::height_from_str;
 
 #[async_trait]
 impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ConnectionQuery for IbcQuery<C, S> {
@@ -36,7 +36,37 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ConnectionQuery f
         request: tonic::Request<QueryConnectionRequest>,
     ) -> std::result::Result<tonic::Response<QueryConnectionResponse>, tonic::Status> {
         tracing::debug!("querying connection {:?}", request);
-        let snapshot = self.0.latest_snapshot();
+        println!("connection {:?}", request);
+
+        let Some(height_val) = request.metadata().get("height") else {
+            return Err(tonic::Status::aborted("missing height"));
+        };
+
+        let height_str: &str = height_val
+            .to_str()
+            .map_err(|e| tonic::Status::aborted(format!("invalid height: {e}")))?;
+
+        println!("height_str {:?}", height_str);
+
+        let (snapshot, height) = if height_str == "0" {
+            let snapshot = self.0.latest_snapshot();
+            let height = snapshot.get_block_height().await.map_err(|e| {
+                tonic::Status::aborted(format!("couldn't get block height: {e}"))
+            })? as u64;
+            (snapshot, Height {
+                revision_number: 0,
+                revision_height: height,
+            })
+        } else {
+            let height = height_from_str(height_str)
+            .map_err(|e| tonic::Status::aborted(format!("couldn't get snapshot: {e}")))?;
+
+            let snapshot = self.0.snapshot(height.revision_height as u64)
+                .ok_or(tonic::Status::aborted(format!("invalid height")))?;
+
+            (snapshot, height)
+        };
+
         let connection_id = &ConnectionId::from_str(&request.get_ref().connection_id)
             .map_err(|e| tonic::Status::aborted(format!("invalid connection id: {e}")))?;
 
@@ -61,10 +91,23 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ConnectionQuery f
         let conn =
             conn.map_err(|e| tonic::Status::aborted(format!("couldn't decode connection: {e}")))?;
 
-        let height = Height {
-            revision_number: 0,
-            revision_height: snapshot.version(),
-        };
+        // use ics23::commitment_proof::Proof;
+
+        // for (i, proof) in proof.proofs.iter().enumerate() {
+        //     if let Some(proof) = &proof.proof {
+        //         match proof {
+        //             Proof::Exist(proof) => {
+        //                 println!("proof at {} is {:?}", i, proof)
+        //             }
+        //             Proof::Nonexist(proof) => {
+        //                 println!("proof at {} is {:?}", i, proof)
+        //             }
+        //             _ => println!("proof at {} is invalid", i),
+        //         }
+        //     } else {
+        //         println!("proof at {} is none", i)
+        //     }
+        // }
 
         let res = QueryConnectionResponse {
             connection: conn,
@@ -92,8 +135,14 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ConnectionQuery f
         &self,
         _request: tonic::Request<QueryConnectionsRequest>,
     ) -> std::result::Result<tonic::Response<QueryConnectionsResponse>, tonic::Status> {
+        println!("connections {:?}", _request);
+
         let snapshot = self.0.latest_snapshot();
-        let height = snapshot.version();
+        let height = snapshot
+            .get_block_height()
+            .await
+            .map_err(|e| tonic::Status::aborted(format!("couldn't get block height: {e}")))?
+            as u64;
 
         let connection_counter = snapshot
             .get_connection_counter()
@@ -139,6 +188,8 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ConnectionQuery f
         &self,
         request: tonic::Request<QueryClientConnectionsRequest>,
     ) -> std::result::Result<tonic::Response<QueryClientConnectionsResponse>, tonic::Status> {
+        println!("client_connections {:?}", request);
+
         let snapshot = self.0.latest_snapshot();
         let client_id = &ClientId::from_str(&request.get_ref().client_id)
             .map_err(|e| tonic::Status::aborted(format!("invalid client id: {e}")))?;
@@ -168,7 +219,9 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ConnectionQuery f
             proof: proof.encode_to_vec(),
             proof_height: Some(Height {
                 revision_number: 0,
-                revision_height: snapshot.version(),
+                revision_height: snapshot.get_block_height().await.map_err(|e| {
+                    tonic::Status::aborted(format!("couldn't get block height: {e}"))
+                })? as u64,
             }),
         }))
     }
@@ -179,6 +232,8 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ConnectionQuery f
         request: tonic::Request<QueryConnectionClientStateRequest>,
     ) -> std::result::Result<tonic::Response<QueryConnectionClientStateResponse>, tonic::Status>
     {
+        println!("connection_client_state {:?}", request);
+
         let snapshot = self.0.latest_snapshot();
         let connection_id = &ConnectionId::from_str(&request.get_ref().connection_id)
             .map_err(|e| tonic::Status::aborted(format!("invalid connection id: {e}")))?;
@@ -216,7 +271,9 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ConnectionQuery f
             proof: proof.encode_to_vec(),
             proof_height: Some(Height {
                 revision_number: 0,
-                revision_height: snapshot.version(),
+                revision_height: snapshot.get_block_height().await.map_err(|e| {
+                    tonic::Status::aborted(format!("couldn't get block height: {e}"))
+                })? as u64,
             }),
         }))
     }
@@ -227,6 +284,8 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ConnectionQuery f
         request: tonic::Request<QueryConnectionConsensusStateRequest>,
     ) -> std::result::Result<tonic::Response<QueryConnectionConsensusStateResponse>, tonic::Status>
     {
+        println!("connection_consensus_state {:?}", request);
+
         let snapshot = self.0.latest_snapshot();
         let consensus_state_height = ibc_types::core::client::Height {
             revision_number: request.get_ref().revision_number,
@@ -268,7 +327,9 @@ impl<C: ChainStateReadExt + Snapshot + 'static, S: Storage<C>> ConnectionQuery f
                 proof: proof.encode_to_vec(),
                 proof_height: Some(Height {
                     revision_number: 0,
-                    revision_height: snapshot.version(),
+                    revision_height: snapshot.get_block_height().await.map_err(|e| {
+                        tonic::Status::aborted(format!("couldn't get block height: {e}"))
+                    })? as u64,
                 }),
             },
         ))

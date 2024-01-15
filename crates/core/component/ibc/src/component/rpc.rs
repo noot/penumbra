@@ -9,11 +9,13 @@ use tonic::transport::server::Routes;
 mod client_query;
 mod connection_query;
 mod consensus_query;
+mod utils;
 
 // Implemented by [`cnidarium::Storage`].
 // Used as a wrapper so external crates can implemented their own [`ChainStateReadExt`].
 pub trait Storage<C>: Send + Sync + 'static {
     fn latest_snapshot(&self) -> C;
+    fn snapshot(&self, version: u64) -> Option<C>;
 }
 
 // Implemented by [`cnidarium::Snapshot`].
