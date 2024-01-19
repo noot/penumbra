@@ -22,6 +22,7 @@ use ibc_types::DomainType;
 use std::str::FromStr;
 use tonic::{Response, Status};
 
+use super::utils::height_from_str;
 use crate::component::{ClientStateReadExt, HostInterface};
 use crate::prefix::MerklePrefixExt;
 use crate::IBC_COMMITMENT_PREFIX;
@@ -34,15 +35,43 @@ impl<HI: HostInterface + Send + Sync + 'static> ClientQuery for IbcQuery<HI> {
         &self,
         request: tonic::Request<QueryClientStateRequest>,
     ) -> std::result::Result<Response<QueryClientStateResponse>, Status> {
-        let snapshot = self.storage.latest_snapshot();
-        let client_id = ClientId::from_str(&request.get_ref().client_id)
-            .map_err(|e| tonic::Status::invalid_argument(format!("invalid client id: {e}")))?;
-        let height = Height {
-            revision_number: HI::get_revision_number(&snapshot)
-                .await
-                .map_err(|e| tonic::Status::aborted(e.to_string()))?,
-            revision_height: snapshot.version(),
+        let Some(height_val) = request.metadata().get("height") else {
+            return Err(tonic::Status::aborted("missing height"));
         };
+
+        let height_str: &str = height_val
+            .to_str()
+            .map_err(|e| tonic::Status::aborted(format!("invalid height: {e}")))?;
+
+        let (snapshot, height) = if height_str == "0" {
+            let snapshot = self.0.latest_snapshot();
+            let height = snapshot.version();
+            (
+                snapshot,
+                Height {
+                    revision_number: 0,
+                    revision_height: height,
+                },
+            )
+        } else {
+            let height = height_from_str(height_str)
+                .map_err(|e| tonic::Status::aborted(format!("couldn't get snapshot: {e}")))?;
+
+            let snapshot = self
+                .0
+                .snapshot(height.revision_height as u64)
+                .ok_or(tonic::Status::aborted(format!("invalid height")))?;
+
+            (
+                snapshot,
+                height
+                    .try_into()
+                    .map_err(|e| tonic::Status::aborted(format!("invalid height: {e}")))?,
+            )
+        };
+
+        let client_i: cnidarium::Snapshotd = ClientId::from_str(&request.get_ref().client_id)
+            .map_err(|e| tonic::Status::invalid_argument(format!("invalid client id: {e}")))?;
 
         // Query for client_state and associated proof.
         let (cs_opt, proof) = snapshot
@@ -109,7 +138,43 @@ impl<HI: HostInterface + Send + Sync + 'static> ClientQuery for IbcQuery<HI> {
         &self,
         request: tonic::Request<QueryConsensusStateRequest>,
     ) -> std::result::Result<tonic::Response<QueryConsensusStateResponse>, tonic::Status> {
-        let snapshot = self.storage.latest_snapshot();
+        let Some(height_val) = request.metadata().get("height") else {
+            return Err(tonic::Status::aborted("missing height"));
+        };
+
+        let height_str: &str = height_val
+            .to_str()
+            .map_err(|e| tonic::Status::aborted(format!("invalid height: {e}")))?;
+
+        let (snapshot, query_height) = if height_str == "0" {
+            let snapshot = self.0.latest_snapshot();
+            let height = snapshot.version();
+            (
+                snapshot,
+                Height {
+                    revision_number: 0,
+                    revision_height: height,
+                },
+            )
+        } else {
+            let height = height_from_str(height_str)
+                .map_err(|e| tonic::Status::aborted(format!("couldn't get snapshot: {e}")))?;
+
+            let snapshot = self
+                .0
+                .snapshot(height.revision_height as u64)
+                .ok_or(tonic::Status::aborted(format!("invalid height")))?;
+
+            let snapshot_height = snapshot.version();
+
+            (
+                snapshot,
+                height
+                    .try_into()
+                    .map_err(|e| tonic::Status::aborted(format!("invalid height: {e}")))?,
+            )
+        };
+
         let client_id = ClientId::from_str(&request.get_ref().client_id)
             .map_err(|e| tonic::Status::invalid_argument(format!("invalid client id: {e}")))?;
         let height = if request.get_ref().latest_height {
