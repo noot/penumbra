@@ -493,7 +493,7 @@ impl<HI: HostInterface + Send + Sync + 'static> ConsensusQuery for IbcQuery<HI> 
                 .map_err(|e| tonic::Status::aborted(format!("couldn't get snapshot: {e}")))?;
 
             self.storage
-                .snapshot(height.revision_height as u64)
+                .snapshot(height.revision_height - 1 as u64)
                 .ok_or(tonic::Status::aborted(format!("invalid height")))?
         };
 
@@ -551,7 +551,7 @@ impl<HI: HostInterface + Send + Sync + 'static> ConsensusQuery for IbcQuery<HI> 
                 .map_err(|e| tonic::Status::aborted(format!("couldn't get snapshot: {e}")))?;
 
             self.storage
-                .snapshot(height.revision_height as u64)
+                .snapshot(height.revision_height - 1 as u64)
                 .ok_or(tonic::Status::aborted(format!("invalid height")))?
         };
 
