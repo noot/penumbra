@@ -69,19 +69,19 @@ impl<HI: HostInterface + Send + Sync + 'static> ConsensusQuery for IbcQuery<HI> 
         let channel =
             channel.map_err(|e| tonic::Status::aborted(format!("couldn't decode channel: {e}")))?;
 
-        let res =
-            QueryChannelResponse {
-                channel,
-                proof: proof.encode_to_vec(),
-                proof_height: Some(ibc_proto::ibc::core::client::v1::Height {
-                    revision_height: HI::get_block_height(&snapshot).await.map_err(|e| {
-                        tonic::Status::aborted(format!("couldn't decode height: {e}"))
-                    })? + 1,
-                    revision_number: HI::get_revision_number(&snapshot).await.map_err(|e| {
-                        tonic::Status::aborted(format!("couldn't decode height: {e}"))
-                    })?,
-                }),
-            };
+        let res = QueryChannelResponse {
+            channel,
+            proof: proof.encode_to_vec(),
+            proof_height: Some(ibc_proto::ibc::core::client::v1::Height {
+                revision_height: HI::get_block_height(&snapshot)
+                    .await
+                    .map_err(|e| tonic::Status::aborted(format!("couldn't decode height: {e}")))?
+                    + 1,
+                revision_number: HI::get_revision_number(&snapshot)
+                    .await
+                    .map_err(|e| tonic::Status::aborted(format!("couldn't decode height: {e}")))?,
+            }),
+        };
 
         Ok(tonic::Response::new(res))
     }
@@ -381,7 +381,7 @@ impl<HI: HostInterface + Send + Sync + 'static> ConsensusQuery for IbcQuery<HI> 
                 .map_err(|e| tonic::Status::aborted(format!("couldn't get snapshot: {e}")))?;
 
             self.storage
-                .snapshot(height.revision_height - 1 as u64)
+                .snapshot(height.revision_height as u64)
                 .ok_or(tonic::Status::aborted(format!("invalid height")))?
         };
 
@@ -507,7 +507,7 @@ impl<HI: HostInterface + Send + Sync + 'static> ConsensusQuery for IbcQuery<HI> 
                 .map_err(|e| tonic::Status::aborted(format!("couldn't get snapshot: {e}")))?;
 
             self.storage
-                .snapshot(height.revision_height - 1 as u64)
+                .snapshot(height.revision_height as u64)
                 .ok_or(tonic::Status::aborted(format!("invalid height")))?
         };
 
@@ -564,7 +564,7 @@ impl<HI: HostInterface + Send + Sync + 'static> ConsensusQuery for IbcQuery<HI> 
                 .map_err(|e| tonic::Status::aborted(format!("couldn't get snapshot: {e}")))?;
 
             self.storage
-                .snapshot(height.revision_height - 1 as u64)
+                .snapshot(height.revision_height as u64)
                 .ok_or(tonic::Status::aborted(format!("invalid height")))?
         };
 
