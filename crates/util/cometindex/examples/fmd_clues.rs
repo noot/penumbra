@@ -52,10 +52,11 @@ CREATE TABLE IF NOT EXISTS fmd_clues_example (
             .event
             .attributes
             .iter()
-            .find(|attr| attr.key == "clue")
+            .find(|attr| attr.key_str().unwrap() == "clue")
             .expect("fmd_clue attribute not found")
-            .value
-            .clone();
+            .value_str()
+            .unwrap()
+            .to_string();
         let tx_hash = event.tx_hash.as_ref().expect("tx_hash not found").to_vec();
 
         sqlx::query(

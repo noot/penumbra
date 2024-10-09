@@ -108,7 +108,7 @@ tonic = { workspace = true }
 tonic-reflection = { workspace = true }
 tonic-web = { workspace = true }
 tower = { workspace = true, features = ["full"] }
-tower-abci = "0.11"
+tower-abci = "0.16"
 tower-actor = "0.1.0"
 tower-http = { workspace = true }
 tower-service = { workspace = true }

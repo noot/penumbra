@@ -4,7 +4,8 @@ use async_trait::async_trait;
 use ibc_proto::ibc::core::channel::v1::query_server::Query as ConsensusQuery;
 use ibc_proto::ibc::core::channel::v1::{
     Channel, PacketState, QueryChannelClientStateRequest, QueryChannelClientStateResponse,
-    QueryChannelConsensusStateRequest, QueryChannelConsensusStateResponse, QueryChannelRequest,
+    QueryChannelConsensusStateRequest, QueryChannelConsensusStateResponse,
+    QueryChannelParamsRequest, QueryChannelParamsResponse, QueryChannelRequest,
     QueryChannelResponse, QueryChannelsRequest, QueryChannelsResponse,
     QueryConnectionChannelsRequest, QueryConnectionChannelsResponse,
     QueryNextSequenceReceiveRequest, QueryNextSequenceReceiveResponse,
@@ -14,6 +15,7 @@ use ibc_proto::ibc::core::channel::v1::{
     QueryPacketCommitmentResponse, QueryPacketCommitmentsRequest, QueryPacketCommitmentsResponse,
     QueryPacketReceiptRequest, QueryPacketReceiptResponse, QueryUnreceivedAcksRequest,
     QueryUnreceivedAcksResponse, QueryUnreceivedPacketsRequest, QueryUnreceivedPacketsResponse,
+    QueryUpgradeErrorRequest, QueryUpgradeErrorResponse, QueryUpgradeRequest, QueryUpgradeResponse,
 };
 use ibc_proto::ibc::core::client::v1::{Height, IdentifiedClientState};
 use ibc_types::path::{
@@ -35,6 +37,27 @@ use super::IbcQuery;
 
 #[async_trait]
 impl<HI: HostInterface + Send + Sync + 'static> ConsensusQuery for IbcQuery<HI> {
+    async fn upgrade_error(
+        &self,
+        _request: tonic::Request<QueryUpgradeErrorRequest>,
+    ) -> std::result::Result<tonic::Response<QueryUpgradeErrorResponse>, tonic::Status> {
+        unimplemented!()
+    }
+
+    async fn upgrade(
+        &self,
+        _request: tonic::Request<QueryUpgradeRequest>,
+    ) -> std::result::Result<tonic::Response<QueryUpgradeResponse>, tonic::Status> {
+        unimplemented!()
+    }
+
+    async fn channel_params(
+        &self,
+        _request: tonic::Request<QueryChannelParamsRequest>,
+    ) -> std::result::Result<tonic::Response<QueryChannelParamsResponse>, tonic::Status> {
+        unimplemented!()
+    }
+
     /// Channel queries an IBC Channel.
     async fn channel(
         &self,
@@ -113,10 +136,12 @@ impl<HI: HostInterface + Send + Sync + 'static> ConsensusQuery for IbcQuery<HI> 
                     tonic::Status::aborted(format!("couldn't get channel {chan_id}: {e}"))
                 })?;
 
+            let upgrade_sequence = channel.upgrade_sequence;
             let id_chan = IdentifiedChannelEnd {
                 channel_id: chan_id,
                 port_id: PortId::transfer(),
                 channel_end: channel,
+                upgrade_sequence,
             };
             channels.push(id_chan.into());
         }
@@ -164,11 +189,13 @@ impl<HI: HostInterface + Send + Sync + 'static> ConsensusQuery for IbcQuery<HI> 
                 .map_err(|e| {
                     tonic::Status::aborted(format!("couldn't get channel {chan_id}: {e}"))
                 })?;
+            let upgrade_sequence = channel.upgrade_sequence;
             if channel.connection_hops.contains(&connection_id) {
                 let id_chan = IdentifiedChannelEnd {
                     channel_id: chan_id,
                     port_id: PortId::transfer(),
                     channel_end: channel,
+                    upgrade_sequence,
                 };
                 channels.push(id_chan.into());
             }
