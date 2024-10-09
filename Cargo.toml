@@ -9,8 +9,8 @@ exclude = ["tools/proto-compiler", "tools/parameter-setup"]
 members = [
   "crates/bench",
   "crates/bin/pcli",
-  "crates/bin/pclientd",
-  "crates/bin/pd",
+  #"crates/bin/pclientd",
+  #"crates/bin/pd",
   "crates/bin/pindexer",
   "crates/cnidarium",
   "crates/cnidarium-component",
@@ -54,7 +54,7 @@ members = [
   "crates/util/cometindex",
   "crates/view",
   "crates/wallet",
-  "tools/summonerd",
+  #"tools/summonerd",
 ]
 
 # Config for 'cargo dist'
@@ -246,4 +246,4 @@ getrandom                        = { version = "0.2", default-features = false, 
 [patch.crates-io]
 ibc-types                        = { git = "https://github.com/noot/ibc-types.git", rev = "b1c17a074980216a8f8d620937c77357b1797bac" }
 jmt                              = { git = "https://github.com/noot/jmt.git", rev = "9a41b264c9db8afb07c337274691e3127411ac47" }
-tower-abci                       = { git = "https://github.com/yito88/tower-abci.git", rev = "7039a737e2f2735fff237dfd01fe95c17dbbdee2" }
+tower-abci                       = { git = "https://github.com/noot/tower-abci.git", rev = "9f723402b56e2bc2368f2a6155bd1b6dbbc2fa19" }
