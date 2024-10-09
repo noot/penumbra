@@ -16,16 +16,20 @@ pub trait ProtoEvent: Message + Name + Serialize + DeserializeOwned + Sized {
             .as_object()
             .expect("serde_json Serialized ProtoEvent should not be empty.")
             .into_iter()
-            .map(|(key, v)| abci::EventAttribute {
-                value: serde_json::to_string(v).expect("must be able to serialize value as JSON"),
-                key: key.to_string(),
-                index: true,
+            .map(|(key, v)| {
+                EventAttribute::from((
+                    key.to_string(),
+                    serde_json::to_string(v).expect("must be able to serialize value as JSON"),
+                    true,
+                ))
             })
             .collect();
 
         // NOTE: cosmo-sdk sorts the attribute list so that it's deterministic every time.[0] I don't know if that is actually conformant but continuing that pattern here for now.
         // [0]: https://github.com/cosmos/cosmos-sdk/blob/8fb62054c59e580c0ae0c898751f8dc46044499a/types/events.go#L102-L104
-        attributes.sort_by(|a, b| (&a.key).cmp(&b.key));
+        //
+        // unwrapping the key strings is fine, as we constructed them above
+        attributes.sort_by(|a, b| (&a.key_str().unwrap()).cmp(&b.key_str().unwrap()));
 
         return abci::Event::new(kind, attributes);
     }
@@ -43,9 +47,12 @@ pub trait ProtoEvent: Message + Name + Serialize + DeserializeOwned + Sized {
         // NOTE: Is there any condition where there would be duplicate EventAttributes and problems that fall out of that?
         let mut attributes = HashMap::<String, serde_json::Value>::new();
         for attr in &event.attributes {
-            let value = serde_json::from_str(&attr.value)
+            let value = serde_json::from_str(&attr.value_str().map_err(|e| anyhow::anyhow!(e))?)
                 .with_context(|| format!("could not parse JSON for attribute {:?}", attr))?;
-            attributes.insert(attr.key.clone(), value);
+            attributes.insert(
+                attr.key_str().map_err(|e| anyhow::anyhow!(e))?.to_string(),
+                value,
+            );
         }
 
         let json = serde_json::to_value(attributes)
@@ -81,11 +88,11 @@ mod tests {
 
         let expected_abci_spend = abci::Event::new(
             "penumbra.core.component.shielded_pool.v1.EventSpend",
-            vec![abci::EventAttribute {
-                key: "nullifier".to_string(),
-                value: "{\"inner\":\"lL6VF1ZxmJFo8o6i6e+JjYyktGKaN6j/o+SzsBoZ29M=\"}".to_string(),
-                index: true,
-            }],
+            vec![abci::EventAttribute::from((
+                "nullifier".to_string(),
+                "{\"inner\":\"lL6VF1ZxmJFo8o6i6e+JjYyktGKaN6j/o+SzsBoZ29M=\"}".to_string(),
+                true,
+            ))],
         );
         assert_eq!(abci_spend, expected_abci_spend);
 
@@ -107,13 +114,13 @@ mod tests {
 
         let expected_abci_output = abci::Event::new(
             "penumbra.core.component.shielded_pool.v1.EventOutput",
-            vec![abci::EventAttribute {
+            vec![abci::EventAttribute::from((
                 // note: attribute keys become camelCase because ProtoJSON...
-                key: "noteCommitment".to_string(),
+                "noteCommitment".to_string(),
                 // note: attribute values are JSON objects, potentially nested as here
-                value: "{\"inner\":\"lL6VF1ZxmJFo8o6i6e+JjYyktGKaN6j/o+SzsBoZ29M=\"}".to_string(),
-                index: true,
-            }],
+                "{\"inner\":\"lL6VF1ZxmJFo8o6i6e+JjYyktGKaN6j/o+SzsBoZ29M=\"}".to_string(),
+                true,
+            ))],
         );
         assert_eq!(abci_output, expected_abci_output);
 

@@ -60,16 +60,10 @@ impl From<tendermint::abci::types::ExecTxResult> for penumbra_pb::TxResult {
 }
 
 impl From<tendermint::abci::EventAttribute> for penumbra_pb::Tag {
-    fn from(
-        tendermint::abci::EventAttribute {
-            key,
-            value,
-            index: _,
-        }: tendermint::abci::EventAttribute,
-    ) -> Self {
+    fn from(attr: tendermint::abci::EventAttribute) -> Self {
         Self {
-            key: key.into_bytes(),
-            value: value.into_bytes(),
+            key: attr.key_bytes().to_vec(),
+            value: attr.value_bytes().to_vec(),
             // TODO(kate): this was set to false previously, but it should probably use the
             // index field from the tendermint object. for now, carry out a refactor and avoid
             // changing behavior while doing so.
@@ -89,6 +83,7 @@ impl From<tendermint_rpc::endpoint::broadcast::tx_async::Response>
             data,
             log,
             hash,
+            ..
         }: tendermint_rpc::endpoint::broadcast::tx_async::Response,
     ) -> Self {
         Self {
@@ -111,6 +106,7 @@ impl From<tendermint_rpc::endpoint::broadcast::tx_sync::Response>
             data,
             log,
             hash,
+            ..
         }: tendermint_rpc::endpoint::broadcast::tx_sync::Response,
     ) -> Self {
         Self {

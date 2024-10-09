@@ -58,6 +58,7 @@ impl MsgHandler for MsgChannelOpenAck {
             remote: expected_counterparty,
             connection_hops: expected_connection_hops,
             version: self.version_on_b.clone(),
+            upgrade_sequence: channel.upgrade_sequence,
         };
 
         state

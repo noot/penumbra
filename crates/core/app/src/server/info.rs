@@ -255,10 +255,12 @@ impl Info {
                         .get_channel(&chan_id, &PortId::transfer())
                         .await?
                         .context("couldn't find channel")?;
+                    let upgrade_sequence = channel.upgrade_sequence;
                     let id_chan = IdentifiedChannelEnd {
                         channel_id: chan_id,
                         port_id: PortId::transfer(),
                         channel_end: channel,
+                        upgrade_sequence,
                     };
                     channels.push(id_chan.into());
                 }
@@ -304,10 +306,12 @@ impl Info {
                         .await?
                         .context("couldn't find channel")?;
                     if channel.connection_hops.contains(&connection_id) {
+                        let upgrade_sequence = channel.upgrade_sequence;
                         let id_chan = IdentifiedChannelEnd {
                             channel_id: chan_id,
                             port_id: PortId::transfer(),
                             channel_end: channel,
+                            upgrade_sequence,
                         };
                         channels.push(id_chan.into());
                     }

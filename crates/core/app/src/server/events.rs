@@ -38,14 +38,18 @@ impl EventIndexLayer {
                 // Perform matching on a nested key in the same format used by
                 // the cosmos SDK: https://docs.cosmos.network/main/core/config
                 // e.g., "message.sender", "message.recipient"
-                let nested_key = format!("{}.{}", e.kind, attr.key);
+                let nested_key = format!(
+                    "{}.{}",
+                    e.kind,
+                    attr.key_str().expect("valid event attribute key string")
+                );
 
                 if self.no_index.is_match(&nested_key) {
-                    attr.index = false;
+                    attr.set_index(false);
                 }
                 // This comes second so that explicit index requests take priority over no-index requests.
                 if self.index.is_match(&nested_key) {
-                    attr.index = true;
+                    attr.set_index(true);
                 }
             }
         }
