@@ -29,6 +29,7 @@ use prost::Message;
 
 use std::str::FromStr;
 
+use crate::component::rpc::utils::height_from_str;
 use crate::component::{ChannelStateReadExt, ConnectionStateReadExt, HostInterface};
 
 use super::IbcQuery;
@@ -364,7 +365,24 @@ impl<HI: HostInterface + Send + Sync + 'static> ConsensusQuery for IbcQuery<HI> 
         &self,
         request: tonic::Request<QueryPacketCommitmentRequest>,
     ) -> std::result::Result<tonic::Response<QueryPacketCommitmentResponse>, tonic::Status> {
-        let snapshot = self.storage.latest_snapshot();
+        let Some(height_val) = request.metadata().get("height") else {
+            return Err(tonic::Status::aborted("missing height"));
+        };
+
+        let height_str: &str = height_val
+            .to_str()
+            .map_err(|e| tonic::Status::aborted(format!("invalid height: {e}")))?;
+
+        let snapshot = if height_str == "0" {
+            self.storage.latest_snapshot()
+        } else {
+            let height = height_from_str(height_str)
+                .map_err(|e| tonic::Status::aborted(format!("couldn't get snapshot: {e}")))?;
+
+            self.storage
+                .snapshot(height.revision_height as u64)
+                .ok_or(tonic::Status::aborted(format!("invalid height")))?
+        };
 
         let port_id = PortId::from_str(&request.get_ref().port_id)
             .map_err(|e| tonic::Status::aborted(format!("invalid port id: {e}")))?;
@@ -473,7 +491,24 @@ impl<HI: HostInterface + Send + Sync + 'static> ConsensusQuery for IbcQuery<HI> 
         &self,
         request: tonic::Request<QueryPacketReceiptRequest>,
     ) -> std::result::Result<tonic::Response<QueryPacketReceiptResponse>, tonic::Status> {
-        let snapshot = self.storage.latest_snapshot();
+        let Some(height_val) = request.metadata().get("height") else {
+            return Err(tonic::Status::aborted("missing height"));
+        };
+
+        let height_str: &str = height_val
+            .to_str()
+            .map_err(|e| tonic::Status::aborted(format!("invalid height: {e}")))?;
+
+        let snapshot = if height_str == "0" {
+            self.storage.latest_snapshot()
+        } else {
+            let height = height_from_str(height_str)
+                .map_err(|e| tonic::Status::aborted(format!("couldn't get snapshot: {e}")))?;
+
+            self.storage
+                .snapshot(height.revision_height as u64)
+                .ok_or(tonic::Status::aborted(format!("invalid height")))?
+        };
 
         let port_id = PortId::from_str(&request.get_ref().port_id)
             .map_err(|e| tonic::Status::aborted(format!("invalid port id: {e}")))?;
@@ -513,7 +548,25 @@ impl<HI: HostInterface + Send + Sync + 'static> ConsensusQuery for IbcQuery<HI> 
         request: tonic::Request<QueryPacketAcknowledgementRequest>,
     ) -> std::result::Result<tonic::Response<QueryPacketAcknowledgementResponse>, tonic::Status>
     {
-        let snapshot = self.storage.latest_snapshot();
+        let Some(height_val) = request.metadata().get("height") else {
+            return Err(tonic::Status::aborted("missing height"));
+        };
+
+        let height_str: &str = height_val
+            .to_str()
+            .map_err(|e| tonic::Status::aborted(format!("invalid height: {e}")))?;
+
+        let snapshot = if height_str == "0" {
+            self.storage.latest_snapshot()
+        } else {
+            let height = height_from_str(height_str)
+                .map_err(|e| tonic::Status::aborted(format!("couldn't get snapshot: {e}")))?;
+
+            self.storage
+                .snapshot(height.revision_height as u64)
+                .ok_or(tonic::Status::aborted(format!("invalid height")))?
+        };
+
         let channel_id = ChannelId::from_str(request.get_ref().channel_id.as_str())
             .map_err(|e| tonic::Status::aborted(format!("invalid channel id: {e}")))?;
         let port_id = PortId::from_str(request.get_ref().port_id.as_str())
